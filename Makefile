@@ -1,6 +1,6 @@
-CFLAGS = -Wall
+CFLAGS = -Wall -std=gnu99  #--std=c99
 
-all: tcpclient udpclient
+all: tcpclient tcpserver udpclient
 
 tcpclient.o: tcpclient.c common.h utils.h
 
