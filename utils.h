@@ -1,6 +1,9 @@
 #include <time.h>
 #include <math.h>
 #include <stdlib.h>
+#include <stdio.h>
+#include <sys/time.h>
+
 
 /* Copied from babeld by Juliusz Chroboczek */
 #define DO_NTOHS(_d, _s) \
@@ -20,14 +23,44 @@
          _dd = htonl(_s); \
          memcpy((_d), &(_dd), 4); } while(0)
 
+extern FILE* logfile;
+
 #define error(...) \
-            do { fprintf(stderr, __VA_ARGS__); } while (0)
+            do {  \
+                if (logfile != NULL) { \
+                    log_date_time(); \
+                    fprintf(logfile, __VA_ARGS__); \
+                    fflush(logfile); \
+                } else { \
+                    fprintf(stdout, __VA_ARGS__); \
+                } \
+            } while (0)
 
 #define info(...) \
-            do { if (verbose >= 1) fprintf(stderr, __VA_ARGS__); } while (0)
+            do {  \
+                if (verbose >= 1) { \
+                    if (logfile != NULL) { \
+                        log_date_time(); \
+                        fprintf(logfile, __VA_ARGS__); \
+                        fflush(logfile); \
+                    } else { \
+                        fprintf(stdout, __VA_ARGS__); \
+                    } \
+                } \
+            } while (0)
 
 #define debug(...) \
-            do { if (verbose >= 2) fprintf(stderr, __VA_ARGS__); } while (0)
+            do { \
+                if (verbose >= 2) { \
+                    if (logfile != NULL) { \
+                        log_date_time(); \
+                        fprintf(logfile, __VA_ARGS__); \
+                        fflush(logfile); \
+                    } else { \
+                        fprintf(stdout, __VA_ARGS__); \
+                    } \
+                } \
+            } while (0)
 
 /* Returns the integer that is closest to a/b */
 static inline int divide_closest(int a, int b)
@@ -37,6 +70,30 @@ static inline int divide_closest(int a, int b)
   if (2 * (a % b) >= b)
     ret += 1;
   return ret;
+}
+
+static inline void log_date_time()
+{
+    char buffer[64];
+    int millisec;
+    struct tm* tm_info;
+    struct timeval tv;
+
+    gettimeofday(&tv, NULL);
+
+    //millisec = lrint(tv.tv_usec/1000.0); // Round to nearest millisec
+    millisec = tv.tv_usec/1000; // Round to nearest millisec
+    if (millisec>=1000) { // Allow for rounding up to nearest second
+        millisec -=1000;
+        tv.tv_sec++;
+    }
+
+    tm_info = localtime(&tv.tv_sec);
+
+    strftime(buffer, 64, "%Y:%m:%d %H:%M:%S", tm_info);
+    fprintf(logfile, "%s.%03d ", buffer, millisec);
+
+
 }
 
 void subtract_timespec(struct timespec *result, const struct timespec *a, const struct timespec *b);

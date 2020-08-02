@@ -36,6 +36,8 @@ struct callback_data {
   struct udp_connection* connections;
 };
 
+FILE *logfile;
+
 /* Array of all UDP connections */
 struct udp_connection *connections;
 
@@ -124,6 +126,7 @@ static void send_query_callback(void *ctx)
   send_query(connection);
 }
 
+#if 0
 static void add_poisson_sender()
 {
   struct poisson_process *process = poisson_new(base);
@@ -137,6 +140,7 @@ static void add_poisson_sender()
     fprintf(stderr, "Failed to start Poisson process %u\n", process->process_id);
   }
 }
+#endif
 
 void usage(char* progname) {
   fprintf(stderr, "usage: %s [-h] [-v] [-R] [-s random_seed] [-t duration]  [--stdin]  [--stdin-rateslope]  -p <port>  -r <rate>  -c <nb_conn>  <host>\n",
@@ -473,6 +477,7 @@ int main(int argc, char** argv)
 
   /* Schedule changes of query rate slope. */
   if (stdin_rateslope_commands == 1) {
+#if 0
     debug("Scheduling query rate slope changes according to stdin commands.\n");
     /* Accounts for 5-seconds delay on all events */
     struct timeval delay_timeval = {5, 0};
@@ -483,6 +488,8 @@ int main(int argc, char** argv)
       timeval_add_ms(&delay_timeval, rateslope_commands[i].duration_ms);
     }
     event_base_loopexit(base, &delay_timeval);
+#endif
+    return 0;
   }
 
   info("Starting event loop\n");

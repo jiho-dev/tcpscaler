@@ -54,7 +54,7 @@ struct rateslope_command {
   int query_rate_slope;
 };
 
-static void add_poisson_sender();
+//static void add_poisson_sender();
 
 int read_nb_commands(unsigned int *nb_commands)
 {
@@ -115,6 +115,7 @@ static void change_query_rate(evutil_socket_t fd, short events, void *ctx)
   info("Changed Poisson rate to %f\n", poisson_rate);
 }
 
+#if 0
 static void stop_event(evutil_socket_t fd, short events, void *ctx)
 {
   struct event *event_to_stop = ctx;
@@ -182,3 +183,4 @@ static void change_query_rate_slope(evutil_socket_t fd, short events, void *ctx)
   event_add(stop_ev, &stop_delay);
   /* TODO: where should we free stop_ev? */
 }
+#endif

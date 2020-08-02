@@ -43,8 +43,10 @@ struct callback_data {
     struct tcp_connection* connections;
 };
 
+FILE *logfile=NULL;
+
 /* Array of all TCP connections */
-struct tcp_connection *connections;
+//struct tcp_connection *connections;
 
 /* Like sleep(), blocks for the given number of seconds, but run the event
    loop in the meantime. */
@@ -80,7 +82,7 @@ static void readcb(struct bufferevent *bev, void *ctx)
        complete DNS message.  We retrieve the query ID to compute the
        RTT. */
     struct evbuffer *input = bufferevent_get_input(bev);
-    debug("Entering readcb\n");
+    //debug("Entering readcb\n");
     /* Loop until we cannot read a complete DNS message. */
     while (1) {
         if (print_rtt) {
@@ -112,7 +114,7 @@ static void readcb(struct bufferevent *bev, void *ctx)
             subtract_timespec(&rtt, &now, query_timestamp);
             /* CSV format: type (Answer), timestamp at the time of reception
                (answer), connection ID, query ID, unused, unused, computed RTT in µs */
-            printf("A,%lu.%.9lu,%u,%u,,,%lu\n",
+            info("A,%lu.%.9lu,%u,%u,,,%lu\n",
                    now_realtime.tv_sec, now_realtime.tv_nsec,
                    params->connection_id,
                    query_id,
@@ -154,7 +156,7 @@ static void send_query_callback(void *ctx)
     if (print_rtt) {
         clock_gettime(CLOCK_REALTIME, &now_realtime);
         /* CSV format: type (Query), timestamp, connection ID, query ID, Poisson ID, poisson interval (in µs), unused. */
-        printf("Q,%lu.%.9lu,%u,%u,%u,,\n",
+        info("Q,%lu.%.9lu,%u,%u,%u,,\n",
                now_realtime.tv_sec, now_realtime.tv_nsec,
                connection->connection_id,
                connection->query_id,
@@ -163,6 +165,7 @@ static void send_query_callback(void *ctx)
     send_query(connection);
 }
 
+/*
 static void add_poisson_sender()
 {
     struct poisson_process *process = poisson_new(base);
@@ -173,20 +176,22 @@ static void add_poisson_sender()
     poisson_set_rate(process, poisson_rate);
     int ret = poisson_start_process(process, NULL);
     if (ret != 0) {
-        fprintf(stderr, "Failed to start Poisson process %u\n", process->process_id);
+        error("Failed to start Poisson process %u\n", process->process_id);
     }
 }
+*/
 
 static void eventcb(struct bufferevent *bev, short events, void *ptr)
 {
     if (events & BEV_EVENT_ERROR) {
-        perror("Connection error");
+        error("Connection error\n");
     }
 }
 
 void usage(char* progname) {
-    fprintf(stderr, "usage: %s [-h] [-v] [-R] [-s random_seed] [-t duration]  [--stdin]  [--stdin-rateslope]  [--tls]  [-n new_conn_rate]  -p <port>  -r <rate>  -c <nb_conn>  <host>\n",
+    fprintf(stderr, "usage: %s [-h] [-v] [-R] [-l logfile] [-s random_seed] [-t duration]  [--stdin]  [--stdin-rateslope]  [--tls]  [-n new_conn_rate]  -p <port>  -r <rate>  -c <nb_conn>  <host>\n",
             progname);
+    fprintf(stderr, "-l: Log file \n");
     fprintf(stderr, "Connects to the specified host and port, with the chosen number of TCP or TLS connections.\n");
     fprintf(stderr, "[rate] is the total number of writes per second towards the server, accross all TCP connections.\n");
     fprintf(stderr, "Each write is 31 bytes.\n");
@@ -239,6 +244,7 @@ int main(int argc, char** argv)
     SSL *ssl = NULL;
     SSL_CTX *ssl_ctx = NULL;
     struct sockaddr_in source;
+    struct tcp_connection *connections;
 
     verbose = 0;
     print_rtt = 0;
@@ -251,7 +257,7 @@ int main(int argc, char** argv)
         {"tls",              no_argument, NULL, 0},
         {NULL,               0,           NULL, 0}
     };
-    while ((opt = getopt_long(argc, argv, "p:r:c:n:vRs:t:h", long_options, &option_index)) != -1) {
+    while ((opt = getopt_long(argc, argv, "p:r:c:n:vRs:t:hl:", long_options, &option_index)) != -1) {
         switch (opt) {
         case 0: /* long option */
             if (option_index == 0) { /* --stdin */
@@ -266,6 +272,16 @@ int main(int argc, char** argv)
             break;
         case 'p': /* TCP port */
             port = optarg;
+            break;
+        case 'l': // logfile
+            if (logfile != NULL) {
+                fclose(logfile);
+            }
+
+            logfile = fopen((const char*)optarg, "a");
+            if (logfile == NULL) {
+                printf("Cannot open logfile: %s \n", optarg);
+            }
             break;
         case 'r': /* Sending rate */
             min_query_rate = strtoul(optarg, NULL, 10);
@@ -300,42 +316,45 @@ int main(int argc, char** argv)
     }
 
     if (optind >= argc || port == NULL || (max_query_rate == 0 && stdin_commands == 0) || nb_conn == 0) {
-        fprintf(stderr, "Error: missing mandatory arguments\n");
+        error("Error: missing mandatory arguments\n");
         usage(argv[0]);
-        return 1;
+        ret = -1;
+        goto OUT;
     }
     if (stdin_commands == 1 && (duration != 0 || max_query_rate != 0 || stdin_rateslope_commands != 0)) {
-        fprintf(stderr, "Error: --stdin is not compatible with -t, -r, or --stdin-rateslope\n");
+        error("Error: --stdin is not compatible with -t, -r, or --stdin-rateslope\n");
         usage(argv[0]);
-        return 1;
+        ret = -1;
+        goto OUT;
     }
     if (stdin_rateslope_commands == 1 && (duration != 0 || stdin_commands != 0)) {
-        fprintf(stderr, "Error: --stdin-rateslope is not compatible with -t or --stdin\n");
+        error( "Error: --stdin-rateslope is not compatible with -t or --stdin\n");
         usage(argv[0]);
-        return 1;
+        ret = -1;
+        goto OUT;
     }
     host = argv[optind];
 
     if (stdin_commands == 1) {
         ret = read_nb_commands(&nb_commands);
         if (ret == -1)
-            return ret;
+            goto OUT;
         /* Read commands */
         commands = calloc(nb_commands, sizeof(struct command));
         ret = read_commands(commands, &min_query_rate, &max_query_rate, nb_commands);
         if (ret == -1)
-            return ret;
+            goto OUT;
         debug("Minimum query rate: %u\n", min_query_rate);
         debug("Maximum query rate: %u\n", max_query_rate);
     } else if (stdin_rateslope_commands == 1) {
         ret = read_nb_commands(&nb_commands);
         if (ret == -1)
-            return ret;
+            goto OUT;
         /* Read "rate slope change" commands */
         rateslope_commands = calloc(nb_commands, sizeof(struct rateslope_command));
         ret = read_rateslope_commands(rateslope_commands, nb_commands);
         if (ret == -1)
-            return ret;
+            goto OUT;
     }
 
     srand48(random_seed);
@@ -376,22 +395,22 @@ int main(int argc, char** argv)
     /* Set maximum number of open files (set soft limit to hard limit) */
     ret = getrlimit(RLIMIT_NOFILE, &limit_openfiles);
     if (ret != 0) {
-        perror("Failed to get limit on number of open files");
+        error("Failed to get limit on number of open files: %s\n", strerror(errno));
+            goto OUT;
     }
     limit_openfiles.rlim_cur = limit_openfiles.rlim_max;
     ret = setrlimit(RLIMIT_NOFILE, &limit_openfiles);
     if (ret != 0) {
-        perror("Failed to set limit on number of open files");
+        error("Failed to set limit on number of open files: %s\n",strerror(errno));
     }
     info("Maximum number of TCP connections: %ld\n", limit_openfiles.rlim_cur);
     if (nb_conn > limit_openfiles.rlim_cur) {
-        fprintf(stderr,
-                "Warning: requested number of TCP connections (%u) larger then maximum number of open files (%ld)\n",
+        error("Warning: requested number of TCP connections (%u) larger then maximum number of open files (%ld)\n",
                 nb_conn, limit_openfiles.rlim_cur);
     }
 
     if (print_rtt) {
-        printf("type,timestamp,connection_id,query_id,poisson_id,poisson_interval_us,rtt_us\n");
+        info("type,timestamp,connection_id,query_id,poisson_id,poisson_interval_us,rtt_us\n");
     }
 
     /* Connect to server */
@@ -403,8 +422,9 @@ int main(int argc, char** argv)
 
     ret = getaddrinfo(host, port, &hints, &res_list);
     if (ret != 0) {
-        fprintf(stderr, "Error in getaddrinfo: %s\n", gai_strerror(ret));
-        return 1;
+        error("Error in getaddrinfo: %s\n", gai_strerror(ret));
+        ret = 1;
+        goto OUT;
     }
 
     for (res = res_list; res != NULL; res = res->ai_next) {
@@ -421,15 +441,16 @@ int main(int argc, char** argv)
             close(sock);
             break;
         } else {
-            perror("Failed to connect");
+            error("Failed to connect: %s\n", strerror(errno));
             close(sock);
         }
     }
 
     /* No address succeeded */
     if (res == NULL) {
-        fprintf(stderr, "Could not connect to host\n");
-        return 1;
+        error("Could not connect to host\n");
+        ret = 1;
+        goto OUT;
     }
 
     /* Copy working server */
@@ -441,8 +462,9 @@ int main(int argc, char** argv)
     /* Create event base with custom options */
     ev_cfg = event_config_new();
     if (!ev_cfg) {
-        fprintf(stderr, "Couldn't allocate event base config\n");
-        return 1;
+        error("Couldn't allocate event base config\n");
+        ret = 1;
+        goto OUT;
     }
     int flags = 0;
     /* Small performance boost: locks are useless since we are not
@@ -462,8 +484,9 @@ int main(int argc, char** argv)
     base = event_base_new_with_config(ev_cfg);
     event_config_free(ev_cfg);
     if (!base) {
-        fprintf(stderr, "Couldn't create event base\n");
-        return 1;
+        error("Couldn't create event base\n");
+        ret = 1;
+        goto OUT;
     }
 
     /* Connect again, but using libevent, and multiple times. */
@@ -485,33 +508,33 @@ int main(int argc, char** argv)
         /* Create and connect socket */
         sock = socket(server->ss_family, SOCK_STREAM, 0);
         if (sock == -1) {
-            perror("Failed to create socket");
+            error("Failed to create socket: %s\n", strerror(errno));
             break;
         }
 
         /*
         source.sin_port = htons(conn_id+1000);
         if (bind(sock, (struct sockaddr *) &source, sizeof(source)) < 0) {
-            perror("Failed to bind socket");
-            break;
+        perror("Failed to bind socket");
+        break;
         }
         */
 
         ret = connect(sock, (struct sockaddr*)server, server_len);
         if (ret != 0) {
-            perror("Failed to connect to host");
+            error("Failed to connect to host: %s \n", strerror(errno));
             break;
         }
         ret = evutil_make_socket_nonblocking(sock);
         if (ret != 0) {
-            perror("Failed to set socket to non-blocking mode");
+            error("Failed to set socket to non-blocking mode: %s\n", strerror(errno));
             break;
         }
 
         if (use_tls) {
             ssl = SSL_new(ssl_ctx);
             if (ssl == NULL) {
-                perror("Failed to initialise openssl object");
+                error("Failed to initialise openssl object: %s \n", strerror(errno));
                 break;
             }
             bufevents[conn_id] = bufferevent_openssl_socket_new(base, sock,
@@ -522,7 +545,7 @@ int main(int argc, char** argv)
         }
 
         if (bufevents[conn_id] == NULL) {
-            perror("Failed to create socket-based bufferevent");
+            error("Failed to create socket-based bufferevent: %s\n", strerror(errno));
             break;
         }
 
@@ -573,7 +596,7 @@ int main(int argc, char** argv)
         poisson_set_rate(process, poisson_rate);
         ret = poisson_start_process(process, &initial_timeout);
         if (ret != 0) {
-            fprintf(stderr, "Failed to start Poisson process %u\n", process->process_id);
+            error("Failed to start Poisson process %u\n", process->process_id);
         }
     }
 
@@ -602,6 +625,7 @@ int main(int argc, char** argv)
 
     /* Schedule changes of query rate slope. */
     if (stdin_rateslope_commands == 1) {
+#if 0
         debug("Scheduling query rate slope changes according to stdin commands.\n");
         /* Accounts for 5-seconds delay on all events */
         struct timeval delay_timeval = {5, 0};
@@ -612,6 +636,8 @@ int main(int argc, char** argv)
             timeval_add_ms(&delay_timeval, rateslope_commands[i].duration_ms);
         }
         event_base_loopexit(base, &delay_timeval);
+#endif
+        return 0;
     }
 
     info("Starting event loop\n");
@@ -642,5 +668,12 @@ int main(int argc, char** argv)
     free(connections);
     poisson_destroy(1);
     event_base_free(base);
-    return 0;
+
+OUT:
+    if (logfile != NULL) {
+        fclose(logfile);
+    }
+
+    return ret;
 }
+
