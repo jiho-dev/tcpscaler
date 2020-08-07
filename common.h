@@ -52,9 +52,12 @@ struct rateslope_command {
   unsigned int duration_ms;
   /* Slope of the query rate increase/decrease, in qps per second */
   int query_rate_slope;
+
+  void *connections;
+  int nb_poisson_change;
 };
 
-//static void add_poisson_sender();
+static void add_poisson_sender(void *cbdata);
 
 int read_nb_commands(unsigned int *nb_commands)
 {
@@ -115,7 +118,6 @@ static void change_query_rate(evutil_socket_t fd, short events, void *ctx)
   info("Changed Poisson rate to %f\n", poisson_rate);
 }
 
-#if 0
 static void stop_event(evutil_socket_t fd, short events, void *ctx)
 {
   struct event *event_to_stop = ctx;
@@ -126,61 +128,67 @@ static void stop_event(evutil_socket_t fd, short events, void *ctx)
 /* Adds or removes Poisson processes to update the query rate. */
 static void add_remove_poisson_processes(evutil_socket_t fd, short events, void *ctx)
 {
-  /* How many (positive or negative) poisson processes should we create? */
-  int *nb_poisson_change = ctx;
-  if (*nb_poisson_change > 0) {
-    debug("Adding %d poisson processes\n", *nb_poisson_change);
-    for (int i = 0; i < *nb_poisson_change; i++) {
-      add_poisson_sender();
+    /* How many (positive or negative) poisson processes should we create? */
+    //int *nb_poisson_change = ctx;
+    struct rateslope_command *command = ctx;
+    int *nb_poisson_change = &command->nb_poisson_change;
+
+    if (*nb_poisson_change > 0) {
+        debug("Adding %d poisson processes\n", *nb_poisson_change);
+        for (int i = 0; i < *nb_poisson_change; i++) {
+            add_poisson_sender(command->connections);
+        }
     }
-  }
-  if (*nb_poisson_change < 0) {
-    debug("Removing %d poisson processes\n", -(*nb_poisson_change));
-    for (int i = 0; i < -(*nb_poisson_change); i++) {
-      poisson_remove(1);
+    if (*nb_poisson_change < 0) {
+        debug("Removing %d poisson processes\n", -(*nb_poisson_change));
+        for (int i = 0; i < -(*nb_poisson_change); i++) {
+            poisson_remove(1);
+        }
     }
-  }
 }
 
 /* Called once, and starts a recurrent event that periodically adds or
    removes Poisson processes to implement a rate slope change. */
 static void change_query_rate_slope(evutil_socket_t fd, short events, void *ctx)
 {
-  struct rateslope_command *command = ctx;
-  struct event *recurr_ev;
-  unsigned long int repeat_interval_us;
-  struct timeval repeat_interval = {0, 0};
-  struct event *stop_ev;
-  struct timeval stop_delay = {0, 0};
-  /* Instructed to do nothing, let's do it. */
-  if (command->query_rate_slope == 0) {
-    info("Resetting query slope to 0 qps/s\n");
-    return;
-  }
-  /* TODO: where should we free nb_poisson_change? */
-  int *nb_poisson_change = malloc(sizeof(int));
-  /* Schedule recurrent event to add or remove poisson processes */
-  /* Compute jointly the interval between updates, and the number of
-     poisson processes to add/remove at each update point.  The goal is to
-     target an update interval of 100 ms (RATE_SLOPE_UPDATE_INTERVAL_MSEC)
-     but the actual value will be slightly different: for instance, to
-     reach a slope of +42 qps/s, we add 4 poisson processes every 95.2 ms. */
-  *nb_poisson_change = divide_closest(command->query_rate_slope * RATE_SLOPE_UPDATE_INTERVAL_MSEC, 1000);
-  if (*nb_poisson_change == 0)
-    *nb_poisson_change = command->query_rate_slope > 0 ? 1 : -1;
-  repeat_interval_us = 1000 * 1000 * (*nb_poisson_change) / command->query_rate_slope;
-  info("Changing query rate slope to %d qps/s (%d Poisson processes every %lu.%.3lu ms)\n",
-       command->query_rate_slope,
-       *nb_poisson_change,
-       repeat_interval_us / 1000,
-       repeat_interval_us % 1000);
-  recurr_ev = event_new(base, -1, EV_PERSIST, add_remove_poisson_processes, nb_poisson_change);
-  timeval_add_us(&repeat_interval, repeat_interval_us);
-  event_add(recurr_ev, &repeat_interval);
-  /* Schedule removal of the repeating event */
-  stop_ev = event_new(base, -1, 0, stop_event, recurr_ev);
-  timeval_add_ms(&stop_delay, command->duration_ms);
-  event_add(stop_ev, &stop_delay);
-  /* TODO: where should we free stop_ev? */
+    struct rateslope_command *command = ctx;
+    struct event *recurr_ev;
+    unsigned long int repeat_interval_us;
+    struct timeval repeat_interval = {0, 0};
+    struct event *stop_ev;
+    struct timeval stop_delay = {0, 0};
+    /* Instructed to do nothing, let's do it. */
+    if (command->query_rate_slope == 0) {
+        info("Resetting query slope to 0 qps/s\n");
+        return;
+    }
+
+    /* TODO: where should we free nb_poisson_change? */
+    //int *nb_poisson_change = malloc(sizeof(int));
+    int *nb_poisson_change = &command->nb_poisson_change;
+
+    /* Schedule recurrent event to add or remove poisson processes */
+    /* Compute jointly the interval between updates, and the number of
+       poisson processes to add/remove at each update point.  The goal is to
+       target an update interval of 100 ms (RATE_SLOPE_UPDATE_INTERVAL_MSEC)
+       but the actual value will be slightly different: for instance, to
+       reach a slope of +42 qps/s, we add 4 poisson processes every 95.2 ms. */
+    *nb_poisson_change = divide_closest(command->query_rate_slope * RATE_SLOPE_UPDATE_INTERVAL_MSEC, 1000);
+    if (*nb_poisson_change == 0)
+        *nb_poisson_change = command->query_rate_slope > 0 ? 1 : -1;
+    repeat_interval_us = 1000 * 1000 * (*nb_poisson_change) / command->query_rate_slope;
+    info("Changing query rate slope to %d qps/s (%d Poisson processes every %lu.%.3lu ms)\n",
+         command->query_rate_slope,
+         *nb_poisson_change,
+         repeat_interval_us / 1000,
+         repeat_interval_us % 1000);
+    //recurr_ev = event_new(base, -1, EV_PERSIST, add_remove_poisson_processes, nb_poisson_change);
+    recurr_ev = event_new(base, -1, EV_PERSIST, add_remove_poisson_processes, ctx);
+    timeval_add_us(&repeat_interval, repeat_interval_us);
+    event_add(recurr_ev, &repeat_interval);
+    /* Schedule removal of the repeating event */
+    stop_ev = event_new(base, -1, 0, stop_event, recurr_ev);
+    timeval_add_ms(&stop_delay, command->duration_ms);
+    event_add(stop_ev, &stop_delay);
+    /* TODO: where should we free stop_ev? */
 }
-#endif

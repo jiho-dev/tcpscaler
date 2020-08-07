@@ -165,9 +165,9 @@ static void send_query_callback(void *ctx)
     send_query(connection);
 }
 
-/*
-static void add_poisson_sender()
+static void add_poisson_sender(void *cbdata)
 {
+    struct tcp_connection *connections = (struct tcp_connection *)cbdata;
     struct poisson_process *process = poisson_new(base);
     struct callback_data *callback_arg = malloc(sizeof(struct callback_data));
     callback_arg->process = process;
@@ -179,7 +179,6 @@ static void add_poisson_sender()
         error("Failed to start Poisson process %u\n", process->process_id);
     }
 }
-*/
 
 static void eventcb(struct bufferevent *bev, short events, void *ptr)
 {
@@ -625,18 +624,18 @@ int main(int argc, char** argv)
 
     /* Schedule changes of query rate slope. */
     if (stdin_rateslope_commands == 1) {
-#if 0
         debug("Scheduling query rate slope changes according to stdin commands.\n");
         /* Accounts for 5-seconds delay on all events */
         struct timeval delay_timeval = {5, 0};
         struct event *change_rate_slope_ev;
         for (int i = 0; i < nb_commands; ++i) {
+            rateslope_commands[i].connections = connections;
             change_rate_slope_ev = event_new(base, -1, 0, change_query_rate_slope, &rateslope_commands[i]);
             event_add(change_rate_slope_ev, &delay_timeval);
             timeval_add_ms(&delay_timeval, rateslope_commands[i].duration_ms);
         }
         event_base_loopexit(base, &delay_timeval);
-#endif
+
         return 0;
     }
 
