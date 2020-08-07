@@ -10,8 +10,8 @@ sysctl net.core.somaxconn=8192
 sysctl fs.file-max=12582912
 
 #vi /etc/security/limits.conf
-#jiho.jung soft nofile 1000000
-#jiho.jung hard nofile 1000000
+#jiho.jung soft nofile 1048576
+#jiho.jung hard nofile 1048576
 
 
 #iptables -t raw -A PREROUTING -p tcp -j NOTRACK
