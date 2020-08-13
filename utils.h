@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <sys/time.h>
+#include <stdarg.h>
 
 
 /* Copied from babeld by Juliusz Chroboczek */
@@ -25,6 +26,7 @@
 
 extern FILE* logfile;
 
+#if 0
 #define error(...) \
             do {  \
                 if (logfile != NULL) { \
@@ -61,6 +63,22 @@ extern FILE* logfile;
                     } \
                 } \
             } while (0)
+#else
+#define error(fmt, ARGS...) \
+            do {  \
+                log_print(logfile, "ERR", fmt, ## ARGS); \
+            } while (0)
+
+#define info(fmt, ARGS...) \
+            do {  \
+                if (verbose >= 1) { log_print(logfile, "INFO", fmt, ## ARGS); } \
+            } while (0)
+
+#define debug(fmt, ARGS...) \
+            do {  \
+                if (verbose >= 2) { log_print(logfile, "DEBUG", fmt, ## ARGS); } \
+            } while (0)
+#endif
 
 /* Returns the integer that is closest to a/b */
 static inline int divide_closest(int a, int b)
@@ -72,12 +90,12 @@ static inline int divide_closest(int a, int b)
   return ret;
 }
 
-static inline void log_date_time()
+static inline void log_date_time(char *buffer)
 {
-    char buffer[64];
     int millisec;
     struct tm* tm_info;
     struct timeval tv;
+    char tbuf[64];
 
     gettimeofday(&tv, NULL);
 
@@ -90,10 +108,28 @@ static inline void log_date_time()
 
     tm_info = localtime(&tv.tv_sec);
 
-    strftime(buffer, 64, "%Y:%m:%d %H:%M:%S", tm_info);
-    fprintf(logfile, "%s.%03d ", buffer, millisec);
+    strftime(tbuf, 64, "%Y:%m:%d %H:%M:%S", tm_info);
+    sprintf(buffer, "%s.%03d", tbuf, millisec);
+}
 
+static inline void log_print(FILE *file, char *msg, const char *fmt, ...)
+{
+    char buffer[64];
 
+    if (file == NULL) {
+        file = stdout;
+    }
+
+    log_date_time(buffer); 
+    fprintf(file, "%s [%s] ", buffer, msg ? msg:"");
+
+    va_list ap;
+    va_start(ap, fmt);
+    vfprintf(file, fmt, ap);
+    va_end(ap);
+
+    fputc('\n',file);
+    fflush(file);
 }
 
 void subtract_timespec(struct timespec *result, const struct timespec *a, const struct timespec *b);

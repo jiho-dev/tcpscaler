@@ -45,7 +45,7 @@ static void ev_callback(evutil_socket_t fd, short events, void *ctx)
 {
   static char buf[256];
   if ((events & EV_READ) == 0) {
-    info("Warning: unexpected event on connection callback\n");
+    info("Warning: unexpected event on connection callback");
     return;
   }
   struct udp_connection *conn = ctx;
@@ -77,7 +77,7 @@ static void ev_callback(evutil_socket_t fd, short events, void *ctx)
   subtract_timespec(&rtt, &now, query_timestamp);
   /* CSV format: type (Answer), timestamp at the time of reception
      (answer), connection ID, query ID, unused, unused, computed RTT in µs */
-  printf("A,%lu.%.9lu,%u,%u,,,%lu\n",
+  info("A,%lu.%.9lu,%u,%u,,,%lu",
 	 now_realtime.tv_sec, now_realtime.tv_nsec,
 	 conn->connection_id,
 	 query_id,

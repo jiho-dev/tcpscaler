@@ -31,10 +31,7 @@ static void readcb(struct bufferevent *bev, void *ctx)
     recv_msg_cnt ++;
 
     if (recv_msg_cnt % print_per_msg == 0) {
-        char s[128];
-        log_date_time(s, 128);
-
-        info("RCV MSG: conn_cnt=%d, recv_msg_cnt=%d \n", conn_cnt, recv_msg_cnt);
+        info("RCV MSG: conn_cnt=%d, recv_msg_cnt=%d", conn_cnt, recv_msg_cnt);
     }
 
     /* Copy all the data from the input buffer to the output buffer. */
@@ -52,7 +49,7 @@ static void eventcb(struct bufferevent *bev, short events, void *ctx)
 
         int idx = (int)(intptr_t)ctx;
 
-        info("Close socket: idx=%d, conn_cnt=%d \n", idx, conn_cnt);
+        info("Close socket: idx=%d, conn_cnt=%d", idx, conn_cnt);
     }
 }
 
@@ -86,7 +83,7 @@ static void accept_conn_cb(struct evconnlistener *listener,
     socklen_t client_len = sizeof(myaddr);
     getsockname(fd, (struct sockaddr *)&myaddr, &client_len);
 
-    info("New connection: conn_cnt=%d %s:%s -> %s:%d\n", 
+    info("New connection: conn_cnt=%d %s:%s -> %s:%d", 
            conn_cnt, 
            host, port,
            inet_ntoa(myaddr.sin_addr),
@@ -106,7 +103,7 @@ accept_error_cb(struct evconnlistener *listener, void *ctx)
     struct event_base *base = evconnlistener_get_base(listener);
     int err = EVUTIL_SOCKET_ERROR();
     error("Got an error %d (%s) on the listener. "
-            "Shutting down.\n", err, evutil_socket_error_to_string(err));
+            "Shutting down.", err, evutil_socket_error_to_string(err));
 
     event_base_loopexit(base, NULL);
 }
@@ -164,7 +161,7 @@ int main(int argc, char** argv)
 
             logfile = fopen((const char*)optarg, "a");
             if (logfile == NULL) {
-                printf("Cannot open logfile: %s \n", optarg);
+                printf("Cannot open logfile: %s\n", optarg);
             }
             break;
         case 'm':
@@ -183,7 +180,7 @@ int main(int argc, char** argv)
     /* First, set soft limit to hard limit */
     ret = getrlimit(RLIMIT_NOFILE, &limit_openfiles);
     if (ret != 0) {
-        error("Failed to get limit on number of open files: %s\n", strerror(errno));
+        error("Failed to get limit on number of open files: %s", strerror(errno));
         goto OUT;
     }
     limit_openfiles.rlim_cur = limit_openfiles.rlim_max;
@@ -194,13 +191,13 @@ int main(int argc, char** argv)
     limit_openfiles.rlim_max = MAX_OPENFILES_DEFAULT;
     ret = setrlimit(RLIMIT_NOFILE, &limit_openfiles);
     if (ret != 0) {
-        error("Failed to increase limit on number of open files to MAX_OPENFILES_DEFAULT: %s\n", strerror(errno));
-        error("Try to run this program as root.\n");
+        error("Failed to increase limit on number of open files to MAX_OPENFILES_DEFAULT: %s", strerror(errno));
+        error("Try to run this program as root.");
     } else {
         /* Try to increase the limit even further. */
         nr_open = fopen("/proc/sys/fs/nr_open", "w");
         if (nr_open == NULL) {
-            error("Failed to open /proc/sys/fs/nr_open for writing: %s\n", strerror(errno));
+            error("Failed to open /proc/sys/fs/nr_open for writing: %s", strerror(errno));
         } else {
             fprintf(nr_open, "%d\n", MAX_OPENFILES_TARGET);
             fclose(nr_open);
@@ -209,7 +206,7 @@ int main(int argc, char** argv)
         limit_openfiles.rlim_max = MAX_OPENFILES_TARGET;
         ret = setrlimit(RLIMIT_NOFILE, &limit_openfiles);
         if (ret != 0) {
-            error("Failed to increase limit on number of open files to MAX_OPENFILES_TARGET: %s\n", strerror(errno));
+            error("Failed to increase limit on number of open files to MAX_OPENFILES_TARGET: %s", strerror(errno));
         }
     }
 
@@ -219,11 +216,11 @@ int main(int argc, char** argv)
         error("Failed to get limit on number of open files");
         goto OUT;
     }
-    info("Maximum number of TCP clients: %ld\n", limit_openfiles.rlim_cur);
+    info("Maximum number of TCP clients: %ld", limit_openfiles.rlim_cur);
 
     base = event_base_new();
     if (!base) {
-        error("Couldn't open event base\n");
+        error("Couldn't open event base");
         ret = 1;
         goto OUT;
     }
@@ -245,7 +242,7 @@ int main(int argc, char** argv)
                                            LEV_OPT_CLOSE_ON_FREE|LEV_OPT_REUSEABLE, 8192,
                                            (struct sockaddr*)&sin, sizeof(sin));
         if (!listener) {
-            error("Couldn't create listener: %s\n", strerror(errno));
+            error("Couldn't create listener: %s", strerror(errno));
             ret = 1;
             goto OUT;
         }
@@ -254,7 +251,7 @@ int main(int argc, char** argv)
         char l_port[NI_MAXSERV];
         getnameinfo((struct sockaddr*)&sin, sizeof(sin), l_host, NI_MAXHOST,
                     l_port, NI_MAXSERV, NI_NUMERICHOST | NI_NUMERICSERV);
-        info("Listening on %s port %s\n", l_host, l_port);
+        info("Listening on %s port %s", l_host, l_port);
         evconnlistener_set_error_cb(listener, accept_error_cb);
     }
 

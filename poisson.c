@@ -41,7 +41,7 @@ static void poisson_event(evutil_socket_t fd, short events, void *ctx)
   generate_poisson_interarrival(&interval, proc->rate);
   int ret = event_add(proc->event, &interval);
   if (ret != 0) {
-    fprintf(stderr, "Failed to schedule next query (Poisson process %u)\n", proc->process_id);
+    error("Failed to schedule next query (Poisson process %u)", proc->process_id);
   }
   /* Run user-provided callback function */
   if (proc->callback != NULL) {

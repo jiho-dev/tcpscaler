@@ -63,15 +63,15 @@ int read_nb_commands(unsigned int *nb_commands)
 {
   int ret = scanf("%u", nb_commands);
   if (ret != 1) {
-    fprintf(stderr, "Error: expected number of commands on first line of stdin\n");
+    error( "Error: expected number of commands on first line of stdin");
     return -1;
   }
   if (*nb_commands > MAX_STDIN_COMMANDS) {
-    fprintf(stderr, "Error: maximum number of allowed commands is %u\n", MAX_STDIN_COMMANDS);
+    error( "Error: maximum number of allowed commands is %u", MAX_STDIN_COMMANDS);
     return -1;
   }
   if (*nb_commands == 0) {
-    fprintf(stderr, "Error: at least one command expected\n");
+    error( "Error: at least one command expected");
     return -1;
   }
   return ret;
@@ -85,7 +85,7 @@ int read_commands(struct command *commands, unsigned int *min_rate, unsigned int
   for (int i = 0; i < nb_commands; ++i) {
     ret = scanf("%u %u", &commands[i].duration_ms, &commands[i].query_rate);
     if (ret != 2) {
-      fprintf(stderr, "Error parsing command input\n");
+      error( "Error parsing command input");
       return -1;
     }
     /* Find smallest and largest query rate */
@@ -103,7 +103,7 @@ int read_rateslope_commands(struct rateslope_command *commands, unsigned int nb_
   for (int i = 0; i < nb_commands; ++i) {
     ret = scanf("%u %d", &commands[i].duration_ms, &commands[i].query_rate_slope);
     if (ret != 2) {
-      fprintf(stderr, "Error parsing command input\n");
+      error( "Error parsing command input");
       return -1;
     }
   }
@@ -115,7 +115,7 @@ static void change_query_rate(evutil_socket_t fd, short events, void *ctx)
   unsigned int *new_rate = ctx;
   poisson_rate = (double) *new_rate / (double) poisson_nb_processes();
   /* TODO: apply this rate to all processes. */
-  info("Changed Poisson rate to %f\n", poisson_rate);
+  info("Changed Poisson rate to %f", poisson_rate);
 }
 
 static void stop_event(evutil_socket_t fd, short events, void *ctx)
@@ -134,13 +134,13 @@ static void add_remove_poisson_processes(evutil_socket_t fd, short events, void 
     int *nb_poisson_change = &command->nb_poisson_change;
 
     if (*nb_poisson_change > 0) {
-        debug("Adding %d poisson processes\n", *nb_poisson_change);
+        debug("Adding %d poisson processes", *nb_poisson_change);
         for (int i = 0; i < *nb_poisson_change; i++) {
             add_poisson_sender(command->connections);
         }
     }
     if (*nb_poisson_change < 0) {
-        debug("Removing %d poisson processes\n", -(*nb_poisson_change));
+        debug("Removing %d poisson processes", -(*nb_poisson_change));
         for (int i = 0; i < -(*nb_poisson_change); i++) {
             poisson_remove(1);
         }
@@ -159,7 +159,7 @@ static void change_query_rate_slope(evutil_socket_t fd, short events, void *ctx)
     struct timeval stop_delay = {0, 0};
     /* Instructed to do nothing, let's do it. */
     if (command->query_rate_slope == 0) {
-        info("Resetting query slope to 0 qps/s\n");
+        info("Resetting query slope to 0 qps/s");
         return;
     }
 
@@ -177,7 +177,7 @@ static void change_query_rate_slope(evutil_socket_t fd, short events, void *ctx)
     if (*nb_poisson_change == 0)
         *nb_poisson_change = command->query_rate_slope > 0 ? 1 : -1;
     repeat_interval_us = 1000 * 1000 * (*nb_poisson_change) / command->query_rate_slope;
-    info("Changing query rate slope to %d qps/s (%d Poisson processes every %lu.%.3lu ms)\n",
+    info("Changing query rate slope to %d qps/s (%d Poisson processes every %lu.%.3lu ms)",
          command->query_rate_slope,
          *nb_poisson_change,
          repeat_interval_us / 1000,
