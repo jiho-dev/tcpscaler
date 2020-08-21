@@ -18,7 +18,7 @@
 #include <netinet/tcp.h>
 #include <netdb.h>
 #include <time.h>
-#include <openssl/ssl.h>
+//#include <openssl/ssl.h>
 
 #include "common.h"
 
@@ -27,7 +27,7 @@ struct tcp_connection {
     /* The actual connection, encapsulated in a bufferevent. */
     struct bufferevent *bev;
     /* Optional openssl context */
-    SSL *ssl;
+    //SSL *ssl;
     /* ID of the connection, mostly for logging purpose. */
     uint32_t connection_id;
     /* Current query ID, incremented for each query and used to index the
@@ -240,8 +240,8 @@ int main(int argc, char** argv)
     char host_s[NI_MAXHOST];
     char port_s[NI_MAXSERV];
     /* TLS handling */
-    SSL *ssl = NULL;
-    SSL_CTX *ssl_ctx = NULL;
+    //SSL *ssl = NULL;
+    //SSL_CTX *ssl_ctx = NULL;
     struct sockaddr_in source;
     struct tcp_connection *connections;
 
@@ -531,6 +531,7 @@ int main(int argc, char** argv)
         }
 
         if (use_tls) {
+            /*
             ssl = SSL_new(ssl_ctx);
             if (ssl == NULL) {
                 error("Failed to initialise openssl object: %s", strerror(errno));
@@ -539,6 +540,7 @@ int main(int argc, char** argv)
             bufevents[conn_id] = bufferevent_openssl_socket_new(base, sock,
                                                                 ssl, BUFFEREVENT_SSL_CONNECTING,
                                                                 BEV_OPT_DEFER_CALLBACKS | BEV_OPT_CLOSE_ON_FREE);
+            */
         } else {
             bufevents[conn_id] = bufferevent_socket_new(base, sock, 0);
         }
@@ -556,7 +558,7 @@ int main(int argc, char** argv)
             setsockopt(bufev_fd, IPPROTO_TCP, TCP_NODELAY, &on, sizeof(on));
         }
         connections[conn_id].connection_id = conn_id;
-        connections[conn_id].ssl = ssl;
+        //connections[conn_id].ssl = ssl;
         connections[conn_id].query_id = 0;
         connections[conn_id].bev = bufevents[conn_id];
         connections[conn_id].query_timestamps = malloc(max_queries_in_flight * sizeof(struct timespec));
@@ -657,11 +659,11 @@ int main(int argc, char** argv)
             free(connections[conn_id].query_timestamps);
         }
         if (use_tls) {
-            SSL_free(connections[conn_id].ssl);
+            //SSL_free(connections[conn_id].ssl);
         }
     }
     if (use_tls) {
-        SSL_CTX_free(ssl_ctx);
+        //SSL_CTX_free(ssl_ctx);
     }
     free(bufevents);
     free(connections);

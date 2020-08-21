@@ -19,3 +19,9 @@ sysctl fs.file-max=12582912
 
 #iptables -t raw -A PREROUTING -p tcp -j NOTRACK
 #iptables -t raw -A OUTPUT -p tcp -j NOTRACK
+
+# for ubuntu
+#sudo apt-get install libevent-openssl-2.0-5
+#sudo apt-get install -y libssl-dev
+
+
