@@ -36,7 +36,8 @@ struct callback_data {
   struct udp_connection* connections;
 };
 
-FILE *logfile;
+FILE *logfile = NULL;
+int use_syslog = 0;
 
 /* Array of all UDP connections */
 struct udp_connection *connections;

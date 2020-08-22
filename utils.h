@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <sys/time.h>
 #include <stdarg.h>
+#include <syslog.h>
 
 
 /* Copied from babeld by Juliusz Chroboczek */
@@ -25,60 +26,23 @@
          memcpy((_d), &(_dd), 4); } while(0)
 
 extern FILE* logfile;
+extern int use_syslog;
+void log_print(FILE *file, int use_syslog, int code, const char *fmt, ...);
 
-#if 0
-#define error(...) \
-            do {  \
-                if (logfile != NULL) { \
-                    log_date_time(); \
-                    fprintf(logfile, __VA_ARGS__); \
-                    fflush(logfile); \
-                } else { \
-                    fprintf(stdout, __VA_ARGS__); \
-                } \
-            } while (0)
-
-#define info(...) \
-            do {  \
-                if (verbose >= 1) { \
-                    if (logfile != NULL) { \
-                        log_date_time(); \
-                        fprintf(logfile, __VA_ARGS__); \
-                        fflush(logfile); \
-                    } else { \
-                        fprintf(stdout, __VA_ARGS__); \
-                    } \
-                } \
-            } while (0)
-
-#define debug(...) \
-            do { \
-                if (verbose >= 2) { \
-                    if (logfile != NULL) { \
-                        log_date_time(); \
-                        fprintf(logfile, __VA_ARGS__); \
-                        fflush(logfile); \
-                    } else { \
-                        fprintf(stdout, __VA_ARGS__); \
-                    } \
-                } \
-            } while (0)
-#else
 #define error(fmt, ARGS...) \
             do {  \
-                log_print(logfile, "ERR", fmt, ## ARGS); \
+                log_print(logfile, use_syslog, LOG_ERR, fmt, ## ARGS); \
             } while (0)
 
 #define info(fmt, ARGS...) \
             do {  \
-                if (verbose >= 1) { log_print(logfile, "INFO", fmt, ## ARGS); } \
+                if (verbose >= 1) { log_print(logfile, use_syslog, LOG_INFO, fmt, ## ARGS); } \
             } while (0)
 
 #define debug(fmt, ARGS...) \
             do {  \
-                if (verbose >= 2) { log_print(logfile, "DEBUG", fmt, ## ARGS); } \
+                if (verbose >= 2) { log_print(logfile, use_syslog, LOG_DEBUG, fmt, ## ARGS); } \
             } while (0)
-#endif
 
 /* Returns the integer that is closest to a/b */
 static inline int divide_closest(int a, int b)
@@ -112,25 +76,51 @@ static inline void log_date_time(char *buffer)
     sprintf(buffer, "%s.%03d", tbuf, millisec);
 }
 
-static inline void log_print(FILE *file, char *msg, const char *fmt, ...)
+/*
+static inline void log_print(FILE *file, int use_syslog, int code, const char *fmt, ...)
 {
-    char buffer[64];
+    char *msg = "";
 
     if (file == NULL) {
         file = stdout;
     }
 
-    log_date_time(buffer); 
-    fprintf(file, "%s [%s] ", buffer, msg ? msg:"");
+    switch (code) {
+    case LOG_ERR:
+        msg = "ERR";
+        break;
+    case LOG_INFO:
+        msg = "INFO";
+        break;
+    case LOG_DEBUG:
+        msg = "DEBUG";
+        break;
+    }
 
-    va_list ap;
-    va_start(ap, fmt);
-    vfprintf(file, fmt, ap);
-    va_end(ap);
+    char buffer[2014];
 
-    fputc('\n',file);
-    fflush(file);
+    if (use_syslog) {
+        va_list ap;
+        va_start(ap, fmt);
+        vsprintf(buffer, fmt, ap);
+        va_end(ap);
+
+        syslog(code|LOG_LOCAL0, buffer);
+
+    } else {
+        log_date_time(buffer); 
+        fprintf(file, "%s [%s] ", buffer, msg);
+
+        va_list ap;
+        va_start(ap, fmt);
+        vfprintf(file, fmt, ap);
+        va_end(ap);
+
+        fputc('\n',file);
+        fflush(file);
+    }
 }
+*/
 
 void subtract_timespec(struct timespec *result, const struct timespec *a, const struct timespec *b);
 

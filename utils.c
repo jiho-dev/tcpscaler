@@ -50,3 +50,47 @@ void generate_poisson_interarrival(struct timeval* tv, double rate)
   tv->tv_sec = (time_t) floor(interarrival);
   tv->tv_usec = lrint(interarrival * 1000000.) % 1000000;
 }
+
+void log_print(FILE *file, int use_syslog, int code, const char *fmt, ...)
+{
+    char *msg = "";
+
+    if (file == NULL) {
+        file = stdout;
+    }
+
+    switch (code) {
+    case LOG_ERR:
+        msg = "ERR";
+        break;
+    case LOG_INFO:
+        msg = "INFO";
+        break;
+    case LOG_DEBUG:
+        msg = "DEBUG";
+        break;
+    }
+
+    char buffer[2014];
+
+    if (use_syslog) {
+        va_list ap;
+        va_start(ap, fmt);
+        vsprintf(buffer, fmt, ap);
+        va_end(ap);
+
+        syslog(code|LOG_LOCAL0, buffer);
+
+    } else {
+        log_date_time(buffer); 
+        fprintf(file, "%s [%s] ", buffer, msg);
+
+        va_list ap;
+        va_start(ap, fmt);
+        vfprintf(file, fmt, ap);
+        va_end(ap);
+
+        fputc('\n',file);
+        fflush(file);
+    }
+}

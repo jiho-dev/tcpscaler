@@ -12,12 +12,15 @@
 #include <unistd.h>
 #include <time.h>
 #include "utils.h"
+#include <pthread.h>
 
+pthread_mutex_t cnt_lock;
 int conn_cnt=0;
 int recv_msg_cnt=0;
 int print_per_msg = 1000;
 int verbose = 0;
 FILE *logfile = NULL;
+int use_syslog = 0;
 
 #define MAX_OPENFILES_DEFAULT 1024 * 1024
 #define MAX_OPENFILES_TARGET  1024 * 1024 * 256
@@ -28,9 +31,13 @@ static void readcb(struct bufferevent *bev, void *ctx)
     struct evbuffer *input = bufferevent_get_input(bev);
     struct evbuffer *output = bufferevent_get_output(bev);
 
+    int r;
+    pthread_mutex_lock(&cnt_lock);
     recv_msg_cnt ++;
+    r = recv_msg_cnt % print_per_msg;
+    pthread_mutex_unlock(&cnt_lock);
 
-    if (recv_msg_cnt % print_per_msg == 0) {
+    if (recv_msg_cnt > 0 && r == 0) {
         info("RCV MSG: conn_cnt=%d, recv_msg_cnt=%d", conn_cnt, recv_msg_cnt);
     }
 
@@ -44,12 +51,19 @@ static void eventcb(struct bufferevent *bev, short events, void *ctx)
         error("Error from bufferevent");
 
     if (events & (BEV_EVENT_EOF | BEV_EVENT_ERROR)) {
-        conn_cnt --;
         bufferevent_free(bev);
 
         int idx = (int)(intptr_t)ctx;
 
-        info("Close socket: idx=%d, conn_cnt=%d", idx, conn_cnt);
+        int r;
+        pthread_mutex_lock(&cnt_lock);
+        conn_cnt --;
+        r = conn_cnt % print_per_msg;
+        pthread_mutex_unlock(&cnt_lock);
+
+        if (r == 0) {
+            info("Close socket: conn_cnt=%d, idx=%d", conn_cnt, idx);
+        }
     }
 }
 
@@ -77,17 +91,24 @@ static void accept_conn_cb(struct evconnlistener *listener,
     getnameinfo(address, socklen, host, NI_MAXHOST, port, NI_MAXSERV,
                 NI_NUMERICHOST | NI_NUMERICSERV);
 
+    int r;
+    pthread_mutex_lock(&cnt_lock);
     conn_cnt ++;
+    r = conn_cnt % print_per_msg;
+    pthread_mutex_unlock(&cnt_lock);
+
 
     struct sockaddr_in myaddr;
     socklen_t client_len = sizeof(myaddr);
     getsockname(fd, (struct sockaddr *)&myaddr, &client_len);
 
-    info("New connection: conn_cnt=%d %s:%s -> %s:%d", 
-           conn_cnt, 
-           host, port,
-           inet_ntoa(myaddr.sin_addr),
-           ntohs(myaddr.sin_port));
+    if (conn_cnt > 0 && r == 0) {
+        info("New connection: conn_cnt=%d %s:%s -> %s:%d", 
+             conn_cnt, 
+             host, port,
+             inet_ntoa(myaddr.sin_addr),
+             ntohs(myaddr.sin_port));
+    }
 
     /* Setup a bufferevent */
     struct event_base *base = evconnlistener_get_base(listener);
@@ -109,9 +130,9 @@ accept_error_cb(struct evconnlistener *listener, void *ctx)
 }
 
 void usage(char* progname) {
-    fprintf(stderr, "usage: %s -p <port>  [-P last_port] [-v]\n", progname);
-    fprintf(stderr, "-p: Listen port, default 4242 \n");
-    fprintf(stderr, "-P: The last listen port in range, default 4242.  \n");
+    fprintf(stderr, "usage: %s -p <port>  [-P <port>] [-v]\n", progname);
+    fprintf(stderr, "-p: start port to listen, default 4242 \n");
+    fprintf(stderr, "-P: end port to listen in range, default 4242.  \n");
     fprintf(stderr, "-l: Log file \n");
     fprintf(stderr, "-m: Print out per received messages \n");
     fprintf(stderr, "-v: Verbose \n");
@@ -155,13 +176,17 @@ int main(int argc, char** argv)
             max_port = atoi(optarg);
             break;
         case 'l': // logfile
-            if (logfile != NULL) {
-                fclose(logfile);
-            }
+            if (strcmp(optarg, "syslog") == 0) {
+                use_syslog = 1;
+            } else {
+                if (logfile != NULL) {
+                    fclose(logfile);
+                }
 
-            logfile = fopen((const char*)optarg, "a");
-            if (logfile == NULL) {
-                printf("Cannot open logfile: %s\n", optarg);
+                logfile = fopen((const char*)optarg, "w");
+                if (logfile == NULL) {
+                    printf("Cannot open logfile: %s\n", optarg);
+                }
             }
             break;
         case 'm':

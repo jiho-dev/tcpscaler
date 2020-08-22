@@ -19,8 +19,15 @@
 #include <netdb.h>
 #include <time.h>
 //#include <openssl/ssl.h>
+#include <pthread.h>
 
 #include "common.h"
+
+pthread_mutex_t cnt_lock;
+int print_per_msg = 1000;
+int msg_cnt = 0;
+FILE *logfile=NULL;
+int use_syslog = 0;
 
 
 struct tcp_connection {
@@ -36,14 +43,13 @@ struct tcp_connection {
     /* Used to remember when we sent the last [max_queries_in_flight]
        queries, to compute a RTT. */
     struct timespec* query_timestamps;
+    int msg_id;
 };
 
 struct callback_data {
     struct poisson_process* process;
     struct tcp_connection* connections;
 };
-
-FILE *logfile=NULL;
 
 /* Array of all TCP connections */
 //struct tcp_connection *connections;
@@ -99,8 +105,8 @@ static void readcb(struct bufferevent *bev, void *ctx)
         input_ptr = evbuffer_pullup(input, 4);
         DO_NTOHS(dns_len, input_ptr);
         DO_NTOHS(query_id, input_ptr + 2);
-        debug("Input buffer length: %lu ; DNS length: %hu ; Query ID: %hu",
-              input_len, dns_len, query_id);
+
+        debug("Input buffer length: %lu ; DNS length: %hu ; Query ID: %hu", input_len, dns_len, query_id);
         if (input_len < dns_len + 2) {
             /* Incomplete message */
             debug("Incomplete DNS reply for query ID %hu (%lu bytes out of %hu), aborting for now",
@@ -109,17 +115,20 @@ static void readcb(struct bufferevent *bev, void *ctx)
         }
         /* We are now certain to have a complete DNS message. */
         /* Compute RTT, in microseconds */
-        if (print_rtt) {
+
+        if (print_rtt && (params->msg_id % print_per_msg) == 0) {
             query_timestamp = &params->query_timestamps[query_id % max_queries_in_flight];
             subtract_timespec(&rtt, &now, query_timestamp);
             /* CSV format: type (Answer), timestamp at the time of reception
                (answer), connection ID, query ID, unused, unused, computed RTT in µs */
-            info("A,%lu.%.9lu,%u,%u,,,%lu",
+            info("A(%d),%lu.%.9lu,%u,%u,,,%lu",
+                   params->msg_id,
                    now_realtime.tv_sec, now_realtime.tv_nsec,
                    params->connection_id,
                    query_id,
                    (rtt.tv_nsec / 1000) + (1000000 * rtt.tv_sec));
         }
+
         /* Discard the DNS message (including the 2-bytes length prefix) */
         evbuffer_drain(input, dns_len + 2);
     }
@@ -152,15 +161,23 @@ static void send_query_callback(void *ctx)
     struct tcp_connection *connection;
     struct callback_data *data = ctx;
     /* Select a TCP connection uniformly at random and send a query on it. */
-    connection = &data->connections[lrand48() % nb_conn];
-    if (print_rtt) {
+    int rand_idx = lrand48() % nb_conn;
+    connection = &data->connections[rand_idx];
+
+    pthread_mutex_lock(&cnt_lock);
+    msg_cnt ++;
+    connection->msg_id = msg_cnt;
+    pthread_mutex_unlock(&cnt_lock);
+
+    if (print_rtt && (connection->msg_id % print_per_msg) == 0) {
         clock_gettime(CLOCK_REALTIME, &now_realtime);
         /* CSV format: type (Query), timestamp, connection ID, query ID, Poisson ID, poisson interval (in µs), unused. */
-        info("Q,%lu.%.9lu,%u,%u,%u,,",
-               now_realtime.tv_sec, now_realtime.tv_nsec,
-               connection->connection_id,
-               connection->query_id,
-               data->process->process_id);
+        info("Q(%d),%lu.%.9lu,%u,%u,%u,,",
+             connection->msg_id,
+             now_realtime.tv_sec, now_realtime.tv_nsec,
+             connection->connection_id,
+             connection->query_id,
+             data->process->process_id);
     }
     send_query(connection);
 }
@@ -188,22 +205,25 @@ static void eventcb(struct bufferevent *bev, short events, void *ptr)
 }
 
 void usage(char* progname) {
-    fprintf(stderr, "usage: %s [-h] [-v] [-R] [-l logfile] [-s random_seed] [-t duration]  [--stdin]  [--stdin-rateslope]  [--tls]  [-n new_conn_rate]  -p <port>  -r <rate>  -c <nb_conn>  <host>\n",
+    fprintf(stderr, "usage: %s [-h] [-v] [-R] [-l logfile] [-s random_seed] [-t duration]  [--stdin]  [--stdin-rateslope]  [--tls]  [-n new_conn_rate]  -p <port> [-P <port>] -r <rate>  -c <nb_conn>  <host>\n",
             progname);
     fprintf(stderr, "-l: Log file \n");
-    fprintf(stderr, "Connects to the specified host and port, with the chosen number of TCP or TLS connections.\n");
-    fprintf(stderr, "[rate] is the total number of writes per second towards the server, accross all TCP connections.\n");
-    fprintf(stderr, "Each write is 31 bytes.\n");
-    fprintf(stderr, "[new_conn_rate] is the number of new connections to open per second when starting the client.\n");
-    fprintf(stderr, "With option '-R', print RTT samples as CSV: connection ID, reception timestamp, RTT in microseconds.\n");
-    fprintf(stderr, "With option '-t', only send queries for the given amount of seconds.\n");
-    fprintf(stderr, "With option '--stdin', the program ignores 'rate' and 'duration' and expects them\n");
-    fprintf(stderr, "to be given on stdin as a sequence of '<duration_ms> <rate>' lines, with a first line giving the number of subsequent lines.\n");
-    fprintf(stderr, "With option '--stdin-rateslope', the program starts from 'rate' qps, and expects\n");
-    fprintf(stderr, "a sequence of '<duration_ms> <slope>' lines to be given on stdin, where each\n");
-    fprintf(stderr, "'slope' in qps/s indicates how much to increase or decrease the query rate. The first line\n");
-    fprintf(stderr, "must give the number of subsequent lines.\n");
-    fprintf(stderr, "Option '-s' allows to choose a random seed (unsigned int) to determine times of transmission.  By default, the seed is set to 42\n");
+    fprintf(stderr, "-p: start port to connect \n");
+    fprintf(stderr, "-P: end port to connect in range \n");
+    fprintf(stderr, "-c: number of connection per port \n");
+    fprintf(stderr, "-r: the total number of writes per second towards the server, accross all TCP connections.\n");
+    fprintf(stderr, "-n: the number of new connections to open per second when starting the client.\n");
+    fprintf(stderr, "-m: Print out per received messages \n");
+    fprintf(stderr, "-R: print RTT samples as CSV: connection ID, reception timestamp, RTT in microseconds.\n");
+    fprintf(stderr, "-t: only send queries for the given amount of seconds.\n");
+    fprintf(stderr, "-s: allows to choose a random seed (unsigned int) to determine times of transmission.  By default, the seed is set to 42\n");
+    fprintf(stderr, "--tls: Connects to the specified host and port, with the chosen number of TCP or TLS connections.\n");
+    fprintf(stderr, "--stdin: the program ignores 'rate' and 'duration' and expects them\n");
+    fprintf(stderr, "         to be given on stdin as a sequence of '<duration_ms> <rate>' lines, with a first line giving the number of subsequent lines.\n");
+    fprintf(stderr, "--stdin-rateslope: the program starts from 'rate' qps, and expects\n");
+    fprintf(stderr, "  a sequence of '<duration_ms> <slope>' lines to be given on stdin, where each\n");
+    fprintf(stderr, "  'slope' in qps/s indicates how much to increase or decrease the query rate. The first line\n");
+    fprintf(stderr, "  must give the number of subsequent lines.\n");
 }
 
 int main(int argc, char** argv)
@@ -236,14 +256,15 @@ int main(int argc, char** argv)
     unsigned int nb_poisson_processes;
     struct poisson_process *process;
     struct callback_data *callback_arg;
-    char *host = NULL, *port = NULL;
+    char *host = NULL;
+    uint16_t start_port=0, end_port=0;
     char host_s[NI_MAXHOST];
     char port_s[NI_MAXSERV];
     /* TLS handling */
     //SSL *ssl = NULL;
     //SSL_CTX *ssl_ctx = NULL;
-    struct sockaddr_in source;
     struct tcp_connection *connections;
+    int per_conn = 10;
 
     verbose = 0;
     print_rtt = 0;
@@ -256,7 +277,7 @@ int main(int argc, char** argv)
         {"tls",              no_argument, NULL, 0},
         {NULL,               0,           NULL, 0}
     };
-    while ((opt = getopt_long(argc, argv, "p:r:c:n:vRs:t:hl:", long_options, &option_index)) != -1) {
+    while ((opt = getopt_long(argc, argv, "p:P:r:c:n:vRs:t:hl:m:", long_options, &option_index)) != -1) {
         switch (opt) {
         case 0: /* long option */
             if (option_index == 0) { /* --stdin */
@@ -270,16 +291,27 @@ int main(int argc, char** argv)
             }
             break;
         case 'p': /* TCP port */
-            port = optarg;
+            start_port = atoi(optarg);
+            end_port = start_port + 1;
+            break;
+        case 'P': /* TCP port */
+            end_port = atoi(optarg);
+            break;
+        case 'm':
+            print_per_msg = atoi(optarg);
             break;
         case 'l': // logfile
-            if (logfile != NULL) {
-                fclose(logfile);
-            }
+            if (strcmp(optarg, "syslog") == 0) {
+                use_syslog = 1;
+            } else {
+                if (logfile != NULL) {
+                    fclose(logfile);
+                }
 
-            logfile = fopen((const char*)optarg, "a");
-            if (logfile == NULL) {
-                printf("Cannot open logfile: %s\n", optarg);
+                logfile = fopen((const char*)optarg, "w");
+                if (logfile == NULL) {
+                    printf("Cannot open logfile: %s\n", optarg);
+                }
             }
             break;
         case 'r': /* Sending rate */
@@ -287,7 +319,7 @@ int main(int argc, char** argv)
             max_query_rate = min_query_rate;
             break;
         case 'c': /* Number of TCP connections */
-            nb_conn = strtoul(optarg, NULL, 10);
+            per_conn = strtoul(optarg, NULL, 10);
             break;
         case 'n': /* Rate of new connections (#/sec) */
             new_conn_rate = strtoul(optarg, NULL, 10);
@@ -314,8 +346,8 @@ int main(int argc, char** argv)
         }
     }
 
-    if (optind >= argc || port == NULL || (max_query_rate == 0 && stdin_commands == 0) || nb_conn == 0) {
-        error("Error: missing mandatory arguments");
+    if (optind >= argc || start_port == 0 || (max_query_rate == 0 && stdin_commands == 0) || per_conn == 0) {
+        error("Error: missing mandatory arguments: %d", per_conn);
         usage(argv[0]);
         ret = -1;
         goto OUT;
@@ -355,6 +387,14 @@ int main(int argc, char** argv)
         if (ret == -1)
             goto OUT;
     }
+
+    int port_range = end_port - start_port;
+    if (port_range < 1) {
+        port_range = 1;
+    }
+
+    nb_conn  = per_conn * port_range;
+    info("Total number of TCP Connection: %d", nb_conn);
 
     srand48(random_seed);
 
@@ -419,7 +459,10 @@ int main(int argc, char** argv)
     hints.ai_flags = 0;
     hints.ai_protocol = 0;
 
-    ret = getaddrinfo(host, port, &hints, &res_list);
+    char tmp[10];
+    sprintf(tmp, "%u", start_port);
+
+    ret = getaddrinfo(host, tmp, &hints, &res_list);
     if (ret != 0) {
         error("Error in getaddrinfo: %s", gai_strerror(ret));
         ret = 1;
@@ -436,7 +479,7 @@ int main(int argc, char** argv)
                     port_s, NI_MAXSERV, NI_NUMERICHOST | NI_NUMERICSERV);
         info("Trying to connect to %s port %s...", host_s, port_s);
         if (connect(sock, res->ai_addr, res->ai_addrlen) != -1) {
-            info("Success!\n");
+            info("Success!");
             close(sock);
             break;
         } else {
@@ -488,98 +531,110 @@ int main(int argc, char** argv)
         goto OUT;
     }
 
-    /* Connect again, but using libevent, and multiple times. */
-    info("Opening %u connections to host %s port %s...", nb_conn, host_s, port_s);
     bufevents = malloc(nb_conn * sizeof(struct bufferevent*));
     connections = malloc(nb_conn * sizeof(struct tcp_connection));
 
-    /*Inititalize source to zero*/
-    memset(&source, 0, sizeof(source));      
+    int port_idx;
+    conn_id = 0;
 
-    source.sin_family = AF_INET;
-    source.sin_addr.s_addr = INADDR_ANY;  //INADDR_ANY = 0.0.0.0
-    //source.sin_addr.s_addr = inet_addr("10.1.1.3");
-    /* Set all bits of the padding field to 0 */
-    memset(source.sin_zero, '\0', sizeof source.sin_zero); //optional
+    for (port_idx = start_port; port_idx < end_port; port_idx ++) {
 
-    for (conn_id = 0; conn_id < nb_conn; conn_id++) {
-        errno = 0;
-        /* Create and connect socket */
-        sock = socket(server->ss_family, SOCK_STREAM, 0);
-        if (sock == -1) {
-            error("Failed to create socket: %s", strerror(errno));
-            break;
-        }
+        /* Connect again, but using libevent, and multiple times. */
+        info("Opening %u connections to host %s port %d...", per_conn, host_s, port_idx);
 
-        /*
-        source.sin_port = htons(conn_id+1000);
-        if (bind(sock, (struct sockaddr *) &source, sizeof(source)) < 0) {
-        perror("Failed to bind socket");
-        break;
-        }
-        */
+        struct sockaddr_in* sa = (struct sockaddr_in*)server;
+        sa->sin_port = htons(port_idx);
 
-        ret = connect(sock, (struct sockaddr*)server, server_len);
-        if (ret != 0) {
-            error("Failed to connect to host: %s", strerror(errno));
-            break;
-        }
-        ret = evutil_make_socket_nonblocking(sock);
-        if (ret != 0) {
-            error("Failed to set socket to non-blocking mode: %s", strerror(errno));
-            break;
-        }
+        int i;
+        for (i = 0; i < per_conn; i++, conn_id ++) {
+            errno = 0;
 
-        if (use_tls) {
-            /*
-            ssl = SSL_new(ssl_ctx);
-            if (ssl == NULL) {
-                error("Failed to initialise openssl object: %s", strerror(errno));
+            /* Create and connect socket */
+            sock = socket(server->ss_family, SOCK_STREAM, 0);
+            if (sock == -1) {
+                error("Failed to create socket: %s", strerror(errno));
                 break;
             }
-            bufevents[conn_id] = bufferevent_openssl_socket_new(base, sock,
-                                                                ssl, BUFFEREVENT_SSL_CONNECTING,
-                                                                BEV_OPT_DEFER_CALLBACKS | BEV_OPT_CLOSE_ON_FREE);
-            */
-        } else {
-            bufevents[conn_id] = bufferevent_socket_new(base, sock, 0);
+
+            ret = connect(sock, (struct sockaddr*)server, server_len);
+            //ret = connect(socket, (struct sockaddr*)&source, sizeof(source));
+
+            if (ret != 0) {
+                error("Failed to connect to host: %s", strerror(errno));
+                break;
+            }
+
+            ret = evutil_make_socket_nonblocking(sock);
+            if (ret != 0) {
+                error("Failed to set socket to non-blocking mode: %s", strerror(errno));
+                break;
+            }
+
+            if (use_tls) {
+                /*
+                ssl = SSL_new(ssl_ctx);
+                if (ssl == NULL) {
+                error("Failed to initialise openssl object: %s", strerror(errno));
+        info("Q(%d:%d:%d),%lu.%.9lu,%u,%u,%u,,",
+                break;
+                }
+                bufevents[conn_id] = bufferevent_openssl_socket_new(base, sock,
+                ssl, BUFFEREVENT_SSL_CONNECTING,
+                BEV_OPT_DEFER_CALLBACKS | BEV_OPT_CLOSE_ON_FREE);
+                */
+            } else {
+                bufevents[conn_id] = bufferevent_socket_new(base, sock, 0);
+            }
+
+            if (bufevents[conn_id] == NULL) {
+                error("Failed to create socket-based bufferevent: %s", strerror(errno));
+                break;
+            }
+
+            /* Disable Nagle */
+            bufev_fd = bufferevent_getfd(bufevents[conn_id]);
+            if (bufev_fd == -1) {
+                info("Failed to disable Nagle on connection %ld (can't get file descriptor)", conn_id);
+            } else {
+                setsockopt(bufev_fd, IPPROTO_TCP, TCP_NODELAY, &on, sizeof(on));
+            }
+            connections[conn_id].connection_id = conn_id;
+            //connections[conn_id].ssl = ssl;
+            connections[conn_id].query_id = 0;
+            connections[conn_id].bev = bufevents[conn_id];
+            connections[conn_id].query_timestamps = malloc(max_queries_in_flight * sizeof(struct timespec));
+            bufferevent_setcb(bufevents[conn_id], readcb, NULL, eventcb, &connections[conn_id]);
+            bufferevent_enable(bufevents[conn_id], EV_READ|EV_WRITE);
+
+            /* Progress output, roughly once per second */
+            if (conn_id % print_per_msg == 0) {
+                info("Opened %ld connections so far...", conn_id);
+            }
+
+            /* Wait a bit between each connection to avoid overwhelming the server. */
+            event_usleep(new_conn_interval);
         }
 
-        if (bufevents[conn_id] == NULL) {
-            error("Failed to create socket-based bufferevent: %s", strerror(errno));
-            break;
-        }
-
-        /* Disable Nagle */
-        bufev_fd = bufferevent_getfd(bufevents[conn_id]);
-        if (bufev_fd == -1) {
-            info("Failed to disable Nagle on connection %ld (can't get file descriptor)", conn_id);
-        } else {
-            setsockopt(bufev_fd, IPPROTO_TCP, TCP_NODELAY, &on, sizeof(on));
-        }
-        connections[conn_id].connection_id = conn_id;
-        //connections[conn_id].ssl = ssl;
-        connections[conn_id].query_id = 0;
-        connections[conn_id].bev = bufevents[conn_id];
-        connections[conn_id].query_timestamps = malloc(max_queries_in_flight * sizeof(struct timespec));
-        bufferevent_setcb(bufevents[conn_id], readcb, NULL, eventcb, &connections[conn_id]);
-        bufferevent_enable(bufevents[conn_id], EV_READ|EV_WRITE);
-
-        /* Progress output, roughly once per second */
-        if (conn_id % new_conn_rate == 0)
-            debug("Opened %ld connections so far...", conn_id);
-
-        /* Wait a bit between each connection to avoid overwhelming the server. */
-        event_usleep(new_conn_interval);
+        info("Opened %ld connections to host %s port %d", conn_id, host_s, port_idx);
     }
-    info("Opened %ld connections to host %s port %s", conn_id, host_s, port_s);
 
     /* Leave some time for all connections to connect */
+    int sleep_time;
+
     if (use_tls) {
-        event_sleep(3 + nb_conn / 200);
+        //event_sleep(3 + nb_conn / 200);
+        sleep_time = 3 + nb_conn / 200;
     } else {
-        event_sleep(3 + nb_conn / 5000);
+        //event_sleep(3 + nb_conn / 5000);
+        sleep_time = 3 + nb_conn / 5000;
     }
+
+    if (sleep_time > 10) {
+        sleep_time = 10;
+    }
+
+    info("Sleep %d secs to initialize all connections", sleep_time);
+    event_sleep(sleep_time);
 
     info("Starting %u Poisson processes generating queries...", nb_poisson_processes);
     for (int i = 0; i < nb_poisson_processes; i++) {
@@ -642,6 +697,7 @@ int main(int argc, char** argv)
     }
 
     info("Starting event loop");
+    info("Every %d messages will be stored", print_per_msg);
     event_base_dispatch(base);
 
     /* Free all the things */

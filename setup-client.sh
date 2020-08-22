@@ -24,4 +24,6 @@ sysctl fs.file-max=12582912
 #sudo apt-get install libevent-openssl-2.0-5
 #sudo apt-get install -y libssl-dev
 
+# for iperf
+#sudo apt-get install iperf
 
