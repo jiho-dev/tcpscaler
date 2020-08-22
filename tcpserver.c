@@ -130,7 +130,8 @@ accept_error_cb(struct evconnlistener *listener, void *ctx)
 }
 
 void usage(char* progname) {
-    fprintf(stderr, "usage: %s -p <port>  [-P <port>] [-v]\n", progname);
+    fprintf(stderr, "usage: %s -p <port> [-d]  [-P <port>] [-v]\n", progname);
+    fprintf(stderr, "-d: run as daemon \n");
     fprintf(stderr, "-p: start port to listen, default 4242 \n");
     fprintf(stderr, "-P: end port to listen in range, default 4242.  \n");
     fprintf(stderr, "-l: Log file \n");
@@ -151,22 +152,12 @@ int main(int argc, char** argv)
     int ret, i;
     int port = 4242;
     int max_port = 4242;
-
-    /*
-    if (argc > 1) {
-    port = atoi(argv[1]);
-    }
-    if (port <= 0 || port > 65535) {
-    fprintf(stderr, "Invalid port\n");
-    return 1;
-    }
-    */
-
+    int is_daemon = 0;
     int c;
 
     opterr = 0;
 
-    while ((c = getopt(argc, argv, "p:P:vm:l:h")) != -1) {
+    while ((c = getopt(argc, argv, "p:P:dvm:l:h")) != -1) {
         switch (c) {
         case 'p':
             port = atoi(optarg);
@@ -191,6 +182,9 @@ int main(int argc, char** argv)
             break;
         case 'm':
             print_per_msg = atoi(optarg);
+            break;
+        case 'd':
+            is_daemon = 1;
             break;
         case 'v':
             verbose ++;
@@ -242,6 +236,10 @@ int main(int argc, char** argv)
         goto OUT;
     }
     info("Maximum number of TCP clients: %ld", limit_openfiles.rlim_cur);
+
+    if (is_daemon) {
+        daemon(1, 0);
+    }
 
     base = event_base_new();
     if (!base) {

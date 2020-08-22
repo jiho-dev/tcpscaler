@@ -9,4 +9,4 @@ sudo rm -f ./server.log
 
 echo "Start TCPServer"
 #sudo ./tcpserver -p 1000 -P 1199 -m 1000 -vv -l ./server.log &
-sudo ./tcpserver -p 1000 -P 1199 -m 1000 -vv -l syslog &
+sudo ./tcpserver -d -p 1000 -P 1199 -m 1000 -vv -l syslog 

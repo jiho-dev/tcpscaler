@@ -5,7 +5,7 @@ all: tcpclient tcpserver udpclient
 
 run:
 #	./tcpclient -R -p 1000 -P 1020 -c 10 -n 10 -r 1 -vv 10.1.1.2
-	./tcpclient -l syslog -R -p 1000 -P 1020 -c 50000 -n 1000000 -r 1000 -m 1000 -v 10.1.1.2
+	./tcpclient -l syslog -R -d -p 1000 -P 1020 -c 50000 -n 1000000 -r 1000 -m 1000 -v 10.1.1.2
 #	gdb -ex run --args ./tcpclient -R -p 1000 -c 10 -n 10 -r 10 -vv 10.1.1.2
 #	gdb -ex run --args ./tcpclient -R -p 1000 -c 10 -n 5 -r 10 -vv 10.1.1.2
 

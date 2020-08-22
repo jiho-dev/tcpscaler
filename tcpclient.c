@@ -205,9 +205,10 @@ static void eventcb(struct bufferevent *bev, short events, void *ptr)
 }
 
 void usage(char* progname) {
-    fprintf(stderr, "usage: %s [-h] [-v] [-R] [-l logfile] [-s random_seed] [-t duration]  [--stdin]  [--stdin-rateslope]  [--tls]  [-n new_conn_rate]  -p <port> [-P <port>] -r <rate>  -c <nb_conn>  <host>\n",
+    fprintf(stderr, "usage: %s [-h] [-v] [-R] [-l logfile] [-s random_seed] [-t duration]  [--stdin]  [--stdin-rateslope]  [--tls]  [-n new_conn_rate]  -p <port> [-P <port>] [-d]  -r <rate>  -c <nb_conn>  <host>\n",
             progname);
     fprintf(stderr, "-l: Log file \n");
+    fprintf(stderr, "-d: run as daemon \n");
     fprintf(stderr, "-p: start port to connect \n");
     fprintf(stderr, "-P: end port to connect in range \n");
     fprintf(stderr, "-c: number of connection per port \n");
@@ -265,6 +266,7 @@ int main(int argc, char** argv)
     //SSL_CTX *ssl_ctx = NULL;
     struct tcp_connection *connections;
     int per_conn = 10;
+    int is_daemon = 0;
 
     verbose = 0;
     print_rtt = 0;
@@ -277,7 +279,7 @@ int main(int argc, char** argv)
         {"tls",              no_argument, NULL, 0},
         {NULL,               0,           NULL, 0}
     };
-    while ((opt = getopt_long(argc, argv, "p:P:r:c:n:vRs:t:hl:m:", long_options, &option_index)) != -1) {
+    while ((opt = getopt_long(argc, argv, "p:P:r:c:n:dvRs:t:hl:m:", long_options, &option_index)) != -1) {
         switch (opt) {
         case 0: /* long option */
             if (option_index == 0) { /* --stdin */
@@ -329,6 +331,9 @@ int main(int argc, char** argv)
             break;
         case 'R': /* Print RTT */
             print_rtt = 1;
+            break;
+        case 'd':
+            is_daemon = 1;
             break;
         case 's': /* Random seed */
             random_seed = strtoul(optarg, NULL, 10);
@@ -388,6 +393,10 @@ int main(int argc, char** argv)
             goto OUT;
     }
 
+    if (is_daemon) {
+        daemon(1, 0);
+    }
+
     int port_range = end_port - start_port;
     if (port_range < 1) {
         port_range = 1;
@@ -395,6 +404,9 @@ int main(int argc, char** argv)
 
     nb_conn  = per_conn * port_range;
     info("Total number of TCP Connection: %d", nb_conn);
+
+    info("Sleep 3 sec to prepare serive");
+    sleep(3);
 
     srand48(random_seed);
 
