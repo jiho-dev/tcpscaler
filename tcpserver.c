@@ -47,8 +47,10 @@ static void readcb(struct bufferevent *bev, void *ctx)
 
 static void eventcb(struct bufferevent *bev, short events, void *ctx)
 {
-    if (events & BEV_EVENT_ERROR)
-        error("Error from bufferevent");
+    if (events & BEV_EVENT_ERROR) {
+        int idx = (int)(intptr_t)ctx;
+        error("Error from bufferevent: idx=%d", idx);
+    }
 
     if (events & (BEV_EVENT_EOF | BEV_EVENT_ERROR)) {
         bufferevent_free(bev);
