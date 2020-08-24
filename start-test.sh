@@ -50,6 +50,61 @@ show_syslog() {
 
 }
 
+show_free() {
+	local i=0
+
+	for ip in ${client_ip}; do
+		i=$((i+1))
+		echo "** Show free on client $i : $ip **"
+		ssh -F tf-ssh-bastion.conf ubuntu@$ip "free"
+	done
+}
+
+show_top() {
+	local i=0
+
+	for ip in ${client_ip}; do
+		i=$((i+1))
+		echo "** Show top on client $i : $ip **"
+		ssh -F tf-ssh-bastion.conf ubuntu@$ip "top -b -n 1 | head"
+	done
+}
+
+show_tcp() {
+	local i=0
+
+	for ip in ${client_ip}; do
+		i=$((i+1))
+		echo "** Show TCP conn on client $i : $ip **"
+		ssh -F tf-ssh-bastion.conf ubuntu@$ip "netstat -an | grep ESTABLISHED | wc -l"
+	done
+}
+
+install_iperf() {
+	local ips=$client_ip
+
+	for ip in ${ips}; do
+		echo "install iperf "
+
+		ssh -F tf-ssh-bastion.conf ubuntu@$ip "sudo apt-get --yes install iperf"
+	done
+}
+
+show_iperf() {
+	local ips=$client_ip
+	local i=0
+
+	for ip in ${ips}; do
+		i=$((i+1))
+		echo -n "Run client $i iperf: $ip - "
+
+#		scp -F tf-ssh-bastion.conf run_iperf.sh ubuntu@$ip:~/
+		ret=$(ssh -F tf-ssh-bastion.conf ubuntu@$ip "iperf -c 10.0.0.2  -t 30 -P 16 | grep SUM")
+		perf=$(echo $ret | awk '{ print $6 }')
+		echo "$perf Gbps"
+	done
+}
+
 #######################
 
 $1
