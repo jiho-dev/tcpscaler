@@ -10,7 +10,7 @@ conn_rate=1000000
 #send_rate=1000
 send_rate=500
 per_msg=1000
-host="10.0.0.2"
+host="10.0.0.4"
 
 
 if [ $# -eq 1 ]; then

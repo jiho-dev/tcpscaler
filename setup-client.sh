@@ -13,17 +13,17 @@ sysctl fs.file-max=12582912
 #jiho.jung soft nofile 1048576
 #jiho.jung hard nofile 1048576
 # all user
-#* soft nofile 1048576
-#* hard nofile 1048576
+echo "* soft nofile 1048576" >> /etc/security/limits.conf
+echo "* hard nofile 1048576" >> /etc/security/limits.conf
 
 
 #iptables -t raw -A PREROUTING -p tcp -j NOTRACK
 #iptables -t raw -A OUTPUT -p tcp -j NOTRACK
 
 # for ubuntu
-#sudo apt-get install libevent-openssl-2.0-5
-#sudo apt-get install -y libssl-dev
+sudo apt-get install -y libevent-openssl-2.0-5
+sudo apt-get install -y libssl-dev
 
 # for iperf
-#sudo apt-get install iperf
+sudo apt-get install -y iperf
 
